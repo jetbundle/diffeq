@@ -1,0 +1,19 @@
+# Core dependencies for The Differential Equations Odyssey
+# Install with: pip install -r requirements.txt
+
+# Numerical computing
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Interactive visualization
+plotly>=5.17.0
+ipywidgets>=8.1.0
+
+# Jupyter
+jupyter>=1.0.0
+jupyterlab>=4.0.0
+notebook>=7.0.0
+
+# Optional but recommended
+matplotlib>=3.7.0
+pandas>=2.0.0
