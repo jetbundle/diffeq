@@ -355,4 +355,4 @@ The journey from explicit formulas to categorical resolutions is not just a hist
 
 ---
 
-*"The differential equation is the most powerful tool humanity has invented for understanding change. This repository is your guide to mastering it."*
+*The differential equation is the most powerful tool humanity has invented for understanding change. This repository is your guide to mastering it.*
