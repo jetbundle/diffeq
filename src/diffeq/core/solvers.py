@@ -33,12 +33,12 @@ class ODESolver:
 
         Args:
             fun: Right-hand side of the system: dy/dt = fun(t, y).
-            t_span: Interval of integration (t0, tf).
+            t_span: Interval of integration (t0, tf). Must satisfy t0 < tf.
             y0: Initial condition (shape: (n,)).
             t_eval: Times at which to store solution. If None, uses adaptive output.
             method: Integration method ('RK45', 'RK23', 'DOP853', 'Radau', 'BDF', 'LSODA').
-            rtol: Relative tolerance.
-            atol: Absolute tolerance.
+            rtol: Relative tolerance (positive).
+            atol: Absolute tolerance (positive).
             dense_output: Whether to compute a continuous solution.
             **kwargs: Additional arguments passed to solve_ivp.
 
@@ -46,8 +46,32 @@ class ODESolver:
             Tuple of (t, y) where y has shape (len(t), n).
 
         Raises:
-            ValueError: If solution fails or becomes unstable.
+            ValueError: If inputs are invalid or solution fails.
         """
+        # Input validation
+        y0_arr = np.asarray(y0)
+        if y0_arr.ndim != 1:
+            raise ValueError("y0 must be a 1D array")
+        if y0_arr.size == 0:
+            raise ValueError("y0 cannot be empty")
+
+        t0, tf = float(t_span[0]), float(t_span[1])
+        if t0 >= tf:
+            raise ValueError("t_span[0] must be less than t_span[1]")
+
+        if rtol <= 0:
+            raise ValueError("rtol must be positive")
+        if atol <= 0:
+            raise ValueError("atol must be positive")
+
+        if t_eval is not None:
+            t_eval_arr = np.asarray(t_eval)
+            if t_eval_arr.ndim != 1:
+                raise ValueError("t_eval must be a 1D array")
+            if len(t_eval_arr) > 0:
+                if np.any(t_eval_arr < t0) or np.any(t_eval_arr > tf):
+                    raise ValueError("t_eval values must be within t_span")
+
         result = solve_ivp(
             fun,
             t_span,
@@ -77,15 +101,32 @@ class ODESolver:
         Args:
             fun: Right-hand side: dy/dt = fun(y, t).
             y0: Initial condition (shape: (n,)).
-            t: Time points at which to solve.
+            t: Time points at which to solve (must be monotonically increasing).
             **kwargs: Additional arguments passed to odeint.
 
         Returns:
             Solution array with shape (len(t), n).
 
         Raises:
-            ValueError: If solution fails.
+            ValueError: If inputs are invalid or solution fails.
         """
+        # Input validation
+        y0_arr = np.asarray(y0)
+        t_arr = np.asarray(t)
+
+        if y0_arr.ndim != 1:
+            raise ValueError("y0 must be a 1D array")
+        if y0_arr.size == 0:
+            raise ValueError("y0 cannot be empty")
+
+        if t_arr.ndim != 1:
+            raise ValueError("t must be a 1D array")
+        if t_arr.size == 0:
+            raise ValueError("t cannot be empty")
+
+        if len(t_arr) > 1 and not np.all(np.diff(t_arr) > 0):
+            raise ValueError("t must be monotonically increasing")
+
         sol = odeint(fun, y0, t, **kwargs)
 
         if np.any(np.isnan(sol)) or np.any(np.isinf(sol)):
@@ -112,13 +153,23 @@ class ODESolver:
 
         Returns:
             Derivative vector [dx/dt, dy/dt, dz/dt].
+
+        Raises:
+            ValueError: If y does not have exactly 3 elements.
         """
-        x, y_val, z = y[0], y[1], y[2]
-        return np.array([
-            sigma * (y_val - x),
-            x * (rho - z) - y_val,
-            x * y_val - beta * z,
-        ])
+        y_arr = np.asarray(y)
+        if y_arr.size != 3:
+            raise ValueError("Lorenz system requires state vector of length 3")
+
+        x, y_val, z = y_arr[0], y_arr[1], y_arr[2]
+        lorentz_system = np.array(
+            [
+                sigma * (y_val - x),
+                x * (rho - z) - y_val,
+                x * y_val - beta * z,
+            ]
+        )
+        return lorenz_system
 
     @staticmethod
     def solve_lorenz(
@@ -132,22 +183,34 @@ class ODESolver:
         """Solve the Lorenz system.
 
         Args:
-            t_span: Time interval (t0, tf).
+            t_span: Time interval (t0, tf). Must satisfy t0 < tf.
             y0: Initial condition [x0, y0, z0].
             sigma: Prandtl number.
             rho: Rayleigh number.
             beta: Geometric parameter.
-            num_points: Number of output points.
+            num_points: Number of output points (positive integer).
 
         Returns:
             Tuple of (t, y) where y has shape (num_points, 3).
+
+        Raises:
+            ValueError: If inputs are invalid.
         """
+        if num_points <= 0:
+            raise ValueError("num_points must be a positive integer")
+
+        y0_arr = np.asarray(y0)
+        if y0_arr.size != 3:
+            raise ValueError("Initial condition must have exactly 3 elements")
+
         t_eval = np.linspace(t_span[0], t_span[1], num_points)
 
         def rhs(t: float, y: NDArray[np.floating]) -> NDArray[np.floating]:
             return ODESolver.lorenz_system(t, y, sigma, rho, beta)
 
-        return ODESolver.solve_ivp(rhs, t_span, y0, t_eval=t_eval, method="DOP853")
+        solution_lorenz = ODESolver.solve_ivp(rhs, t_span, y0_arr, t_eval=t_eval, method="DOP853")
+
+        return solution_lorenz
 
     @staticmethod
     def solve_duffing(
@@ -158,19 +221,38 @@ class ODESolver:
         """Solve the Duffing oscillator: d²x/dt² + x + εx³ = 0.
 
         Args:
-            t: Time points.
+            t: Time points (must be monotonically increasing).
             y0: Initial condition [x(0), dx/dt(0)].
             epsilon: Nonlinearity strength.
 
         Returns:
             Solution array with shape (len(t), 2) where columns are [x, dx/dt].
+
+        Raises:
+            ValueError: If inputs are invalid.
         """
+        t_arr = np.asarray(t)
+        y0_arr = np.asarray(y0)
+
+        if t_arr.ndim != 1 or t_arr.size < 2:
+            raise ValueError("t must be a 1D array with at least 2 points")
+
+        if len(t_arr) > 1 and not np.all(np.diff(t_arr) > 0):
+            raise ValueError("t must be monotonically increasing")
+
+        if y0_arr.size != 2:
+            raise ValueError("Initial condition must have exactly 2 elements [x0, v0]")
+
         def rhs(tt: float, y: NDArray[np.floating]) -> NDArray[np.floating]:
             x, xdot = y[0], y[1]
             return np.array([xdot, -x - epsilon * x ** 3])
 
-        t_span = (t[0], t[-1])
-        _, y = ODESolver.solve_ivp(rhs, t_span, y0, t_eval=t, method="DOP853")
+        t_span = (t_arr[0], t_arr[-1])
+
+        solution_duffing = ODESolver.solve_ivp(rhs, t_span, y0_arr, t_eval=t_arr, method="DOP853")
+
+        _, y = solution_duffing
+
         return y
 
 
@@ -193,22 +275,73 @@ class PDESolver:
         Args:
             u0: Initial condition u(x, 0) (shape: (nx,)).
             x: Spatial grid points (uniform spacing assumed).
-            t: Time points.
-            alpha: Diffusion coefficient.
+            t: Time points (must be monotonically increasing).
+            alpha: Diffusion coefficient (positive).
             bc_left: Left boundary condition (type, value).
+                     Supported types: 'dirichlet', 'neumann'.
             bc_right: Right boundary condition (type, value).
+                      Supported types: 'dirichlet', 'neumann'.
 
         Returns:
             Solution array with shape (len(t), len(x)).
+
+        Raises:
+            ValueError: If inputs are invalid or grid spacing is non-uniform.
+
+        Notes:
+            - Assumes regular/uniform spatial grid.
+            - Uses implicit Euler method for unconditional stability.
         """
-        nx = len(x)
-        dx = x[1] - x[0]
-        dt = t[1] - t[0] if len(t) > 1 else 0.01
+        # Input validation
+        u0_arr = np.asarray(u0)
+        x_arr = np.asarray(x)
+        t_arr = np.asarray(t)
+        
+        if u0_arr.ndim != 1 or u0_arr.size < 2:
+            raise ValueError("u0 must be a 1D array with at least 2 points")
+        
+        if x_arr.ndim != 1 or x_arr.size < 2:
+            raise ValueError("x must be a 1D array with at least 2 points")
+        
+        if t_arr.ndim != 1 or t_arr.size < 1:
+            raise ValueError("t must be a 1D array with at least 1 point")
+        
+        if u0_arr.size != x_arr.size:
+            raise ValueError("u0 and x must have the same length")
+        
+        if alpha <= 0:
+            raise ValueError("alpha must be positive")
+        
+        if len(t_arr) > 1 and not np.all(np.diff(t_arr) > 0):
+            raise ValueError("t must be monotonically increasing")
+
+        # Check uniform spacing
+        dx_vals = np.diff(x_arr)
+        if not np.allclose(dx_vals, dx_vals[0], rtol=1e-10):
+            raise ValueError("x must have uniform spacing")
+
+        # Validate boundary condition types
+        valid_bc_types = {'dirichlet', 'neumann'}
+        if bc_left[0] not in valid_bc_types:
+            raise ValueError(f"bc_left type must be one of {valid_bc_types}")
+        if bc_right[0] not in valid_bc_types:
+            raise ValueError(f"bc_right type must be one of {valid_bc_types}")
+
+        nx = len(x_arr)
+        dx = dx_vals[0]
+
+        if len(t_arr) == 1:
+            # Single time point - return initial condition
+            return u0_arr.reshape(1, -1)
+ 
+        dt = t_arr[1] - t_arr[0]
+        if dt <= 0:
+            raise ValueError("Time step dt must be positive")
 
         r = alpha * dt / (dx ** 2)
 
-        u = np.zeros((len(t), nx))
-        u[0, :] = u0.copy()
+        u = np.zeros((len(t_arr), nx))
+        u[0, :] = u0_arr.copy()
 
         # Build tridiagonal matrix for implicit Euler
         diag_main = np.ones(nx) * (1 + 2 * r)
@@ -232,7 +365,7 @@ class PDESolver:
 
         A = diags([diag_lower, diag_main, diag_upper], [-1, 0, 1], format="csc")
 
-        for i in range(1, len(t)):
+        for i in range(1, len(t_arr)):
             b = u[i - 1, :].copy()
             if bc_left[0] == "dirichlet":
                 b[0] = bc_left[1]
@@ -258,26 +391,70 @@ class PDESolver:
         Args:
             u0: Initial condition u(x, 0) (shape: (nx,)).
             x: Spatial grid points (uniform spacing assumed).
-            t: Time points.
-            nu: Viscosity coefficient.
+            t: Time points (must be monotonically increasing).
+            nu: Viscosity coefficient (non-negative).
 
         Returns:
             Solution array with shape (len(t), len(x)).
+
+        Raises:
+            ValueError: If inputs are invalid or grid spacing is non-uniform.
+
+        Notes:
+            - Assumes regular/uniform spatial grid.
+            - Uses operator splitting: explicit upwind for advection,
+              implicit Euler for diffusion.
+            - Dirichlet boundary conditions (u = 0 at boundaries).
         """
-        nx = len(x)
-        dx = x[1] - x[0]
-        dt = t[1] - t[0] if len(t) > 1 else 0.001
+        # Input validation
+        u0_arr = np.asarray(u0)
+        x_arr = np.asarray(x)
+        t_arr = np.asarray(t)
 
-        u = np.zeros((len(t), nx))
-        u[0, :] = u0.copy()
+        if u0_arr.ndim != 1 or u0_arr.size < 2:
+            raise ValueError("u0 must be a 1D array with at least 2 points")
 
-        for i in range(1, len(t)):
+        if x_arr.ndim != 1 or x_arr.size < 2:
+            raise ValueError("x must be a 1D array with at least 2 points")
+
+        if t_arr.ndim != 1 or t_arr.size < 1:
+            raise ValueError("t must be a 1D array with at least 1 point")
+
+        if u0_arr.size != x_arr.size:
+            raise ValueError("u0 and x must have the same length")
+
+        if nu < 0:
+            raise ValueError("nu must be non-negative")
+
+        if len(t_arr) > 1 and not np.all(np.diff(t_arr) > 0):
+            raise ValueError("t must be monotonically increasing")
+
+        # Check uniform spacing
+        dx_vals = np.diff(x_arr)
+        if not np.allclose(dx_vals, dx_vals[0], rtol=1e-10):
+            raise ValueError("x must have uniform spacing")
+
+        nx = len(x_arr)
+        dx = dx_vals[0]
+        
+        if len(t_arr) == 1:
+            # Single time point - return initial condition
+            return u0_arr.reshape(1, -1)
+        
+        dt = t_arr[1] - t_arr[0]
+        if dt <= 0:
+            raise ValueError("Time step dt must be positive")
+
+        u = np.zeros((len(t_arr), nx))
+        u[0, :] = u0_arr.copy()
+
+        for i in range(1, len(t_arr)):
             u_prev = u[i - 1, :]
 
             # Upwind finite difference for advection
             ux = np.zeros(nx)
             ux[1:] = (u_prev[1:] - u_prev[:-1]) / dx
-            ux[0] = ux[1]
+            ux[0] = ux[1]  # Extrapolate at boundary
 
             # Diffusion term (implicit)
             r = nu * dt / (dx ** 2)
@@ -285,6 +462,7 @@ class PDESolver:
             diag_upper = np.ones(nx - 1) * (-r)
             diag_lower = np.ones(nx - 1) * (-r)
 
+            # Dirichlet boundary conditions
             diag_main[0] = 1.0
             diag_main[-1] = 1.0
             diag_upper[0] = 0.0
@@ -294,6 +472,10 @@ class PDESolver:
 
             # Nonlinear advection term (explicit)
             b = u_prev - dt * u_prev * ux
+
+            # Enforce boundary conditions
+            b[0] = 0.0
+            b[-1] = 0.0
 
             u[i, :] = spsolve(A, b)
 
